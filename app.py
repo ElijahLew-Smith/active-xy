@@ -125,7 +125,7 @@ def create_slider(label, slider_id, scale_type, min_value, max_value, step, defa
     ], style={'display': 'flex', 'alignItems': 'center', 'justifyContent': 'space-between', 'marginBottom': '10px'})
 
 app = dash.Dash(__name__)
-
+server = app.server
 
 app.layout = html.Div([
     
