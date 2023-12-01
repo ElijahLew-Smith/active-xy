@@ -49,7 +49,8 @@ simulation.initialize_single_time_evolution()
 
 default_params = {
     'interval': 50, 
-    'page_size': 1600
+    'page_size': 1600,
+    'arrow_number': 12,
 }
 
 slider_mapping = {
@@ -62,7 +63,7 @@ slider_mapping = {
     'damping': 'damping',
     'noise': 'noise',
     'temp': 'temp',
-    # 'arrow-number-slider': 'arrow_number', 
+    'arrow_number': 'arrow_number', 
 }
 
 
@@ -70,20 +71,14 @@ slider_style = { 'alignItems': 'center',  'width': (3/8)*default_params['page_si
 dropdown_style = {'padding': '10px', 'width': '200px', 'margin': 'auto'}
 
 #This is from [0.01, 100] on a linear scale 
+log_interval_range = [1,3]
 fdt_log_range = [-2, 2]
 dt_log_range = [-3, 0]
 
 
 
 
-# Define the figure layout once outside of the callback
-figure_layout = go.Layout(
-    width=default_params['page_size']/2,
-    height=default_params['page_size']/2,
-    margin=dict(l=20, r=20, t=40, b=20),
-    xaxis=dict(visible=False),
-    yaxis=dict(visible=False),
-)
+
 
 
 log_scale_sliders = {'dt', 
@@ -129,6 +124,8 @@ server = app.server
 
 app.layout = html.Div([
     
+    dcc.Store(id='lattice'),
+
     # Component on Left 
     html.Div([
         # Graph
@@ -153,9 +150,11 @@ app.layout = html.Div([
     # Update interval and timestep 
     html.Div([
         html.Div(id='output-div') ,
+        # create_slider('Update Interval (in milliseconds):', 'interval_value',  'log10', log_interval_range[0], log_interval_range[1], 0.001,  np.log10(default_params['interval']),  {i: f"{10**float(i):.1}" for i in range(log_interval_range[0], log_interval_range[1]+1)}),
         create_slider('Update Interval (in milliseconds):', 'interval_value',  'linear', 10, 300, 10,  default_params['interval'],  {i: str(i) for i in range(10, 301, 50)}),
-        create_slider('Timestep:', 'dt',  'log10', dt_log_range[0], dt_log_range[1], 0.001, np.log10(sim_params['dt']), {i: f"{10**float(i):.1}" for i in range(dt_log_range[0], dt_log_range[1] + 1)} ),
+        create_slider('Timestep:', 'dt',  'log10',   dt_log_range[0], dt_log_range[1], 0.001, np.log10(sim_params['dt']), {i: f"{10**float(i):.1}" for i in range(dt_log_range[0], dt_log_range[1] + 1)} ),
         create_slider('Linear Size:', 'size',  'linear', 0, 400, 1, sim_params['X'],{i: f"{i}" for i in range(0, 400, 20)} ),
+        create_slider('Arrow Number:', 'arrow_number',  'linear', 0, 20, 1, default_params['arrow_number'],{i: f"{i}" for i in range(0, 20, 20)} ),
 
     ]),
 
@@ -201,7 +200,8 @@ app.layout = html.Div([
                 {'label': 'None', 'value': 'none'},
                 {'label': 'Blob', 'value': 'blob'},
                 {'label': 'Vorticies', 'value': 'opposite_vortex'},
-                {'label': 'Vortex', 'value': 'vortex'},
+                {'label': '+1 Vortex', 'value': 'plus_vortex'},
+                {'label': '-1 Vortex', 'value': 'minus_vortex'},
                 {'label': 'Square', 'value': 'perturbation'},
             ],
             value=sim_params['perturbation_type'], 
@@ -304,6 +304,8 @@ app.layout = html.Div([
 
 
 
+
+
 # Updates the interval 
 @app.callback(
     Output('interval-component', 'interval'),
@@ -312,24 +314,28 @@ app.layout = html.Div([
     [State('interval-component', 'interval')]
 )
 def set_interval(run_clicks, slider_interval, current_interval):
-    ctx = dash.callback_context
+    ctx = callback_context
+    print(slider_interval, current_interval)
 
-    # Check if the run button was clicked
     if ctx.triggered:
-        trigger_id = ctx.triggered[0]['prop_id'].split('.')[0]
-        if trigger_id == 'run-button':
-            # Toggle the simulation state
-            if current_interval == slider_interval:
-                return 24 * 60 * 60 * 100000  # High value to pause updates
-            else:
-                return slider_interval  # Regular interval to resume updates
-        elif trigger_id == 'interval_value':
-            return slider_interval
+        trigger_id = ctx.triggered[0]['prop_id'].split('.')[0]  # Split to separate the ID from the property
 
-    # If the callback wasn't triggered by the run button, set it to the default. This happens during initialzation
-    return default_params['interval']   
+        # Check if the trigger_id is a JSON-like dictionary
+        try:
+            triggered_dict = json.loads(trigger_id)
+            if triggered_dict.get('index') == 'interval_value' and triggered_dict.get('type') == 'dynamic-slider':
+                return slider_interval
+        except json.JSONDecodeError:
+            # If it's not a JSON-like dictionary, it could be a simple string ID
+            if trigger_id == 'run-button':
+                # Toggle the simulation state
+                if current_interval == slider_interval:
+                    return 24 * 60 * 60 * 100000  # High value to pause updates
+                else:
+                    return slider_interval  # Regular interval to resume updates
 
-
+    # Default return if none of the conditions are met
+    return default_params['interval']
 
 
 
@@ -412,9 +418,12 @@ def sync_input_and_slider(fixed_fdt_parameter, input_values, slider_values, slid
 
 
 
+
 @app.callback(
-    Output('simulation-graph',      'figure'),
+    [Output('simulation-graph',      'figure'),
+    Output('lattice', 'data')],
     [Input('interval-component',    'n_intervals'),
+     Input('lattice', 'data'), 
      Input('reset-button',          'n_clicks'),
      Input({'type': 'input-for-slider', 'index': ALL}, 'value'),
      Input({'type': 'input-for-slider', 'index': ALL}, 'id'),
@@ -428,7 +437,7 @@ def sync_input_and_slider(fixed_fdt_parameter, input_values, slider_values, slid
     
 )
 
-def update_graph(n, reset_clicks, 
+def update_graph(n, lattice, reset_clicks, 
                  values, ids, 
                  boundary_conditions, initial_background, perturbation_type, 
                  fixed_fdt_parameter, 
@@ -444,20 +453,18 @@ def update_graph(n, reset_clicks,
 
     # Now you can use the named variables directly
     interval_value       = input_values['interval_value']
-    dt               = input_values['dt']
+    dt                   = input_values['dt']
     size                 = input_values['size']
 
     background_angle     = input_values['background_angle']
 
     perturbation_angle   = input_values['perturbation_angle']
     perturbation_size    = input_values['perturbation_size']
-    
+    arrow_number         = input_values['arrow_number']
+
     damping = input_values['damping']
     noise = input_values['noise']
     temp = input_values['temp']
-
- 
-
 
     ctx = callback_context
 
@@ -496,20 +503,24 @@ def update_graph(n, reset_clicks,
         simulation.initialize_FDT()
         simulation.model_type = model_type
         simulation.active_component = active_component
+        simulation.arrow_number = arrow_number
         simulation.initialize_active_force()
-
+        # simulation.lattice = lattice
         simulation.lattice = simulation.runge_kutta_step() % (np.pi * 2)
 
-
-
-
-
-    fig = simulation.poltly_configuration(arrow_number =None, configuration=simulation.lattice.T)
-
+    fig = simulation.plotly_configuration(configuration=simulation.lattice.T)
+    figure_layout = go.Layout(
+        width=default_params['page_size']/2,
+        height=default_params['page_size']/2,
+        xaxis=dict(ticks='', showticklabels=False, showgrid=False, range=[0, simulation.X-1]),
+        yaxis=dict(ticks='', showticklabels=False, showgrid=False, range=[0, simulation.Y-1]),
+        autosize=False, 
+    margin=dict(l=0, r=0, b=0, t=0, pad=0)
+    )
     fig.update_layout(figure_layout)
 
 
-    return fig
+    return fig, simulation.lattice
 
 
 # Run the app

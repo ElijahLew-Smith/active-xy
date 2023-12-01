@@ -20,6 +20,7 @@ from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import ProcessPoolExecutor
 from sklearn.metrics import r2_score
 import plotly.graph_objs as go
+import plotly.figure_factory as ff
 
 # import cProfile
 # import pstats
@@ -586,7 +587,12 @@ class ActiveXY:
                     radius = np.sqrt(x**2 + y**2)
                     if radius <= self.perturbation_size / 2:
                         self.theta_initial[i, j] = np.random.rand() * np.pi * 2
-        elif self.perturbation_type == 'vortex':
+        elif self.perturbation_type == 'plus_vortex':
+            for i in range(self.X):
+              for j in range(self.Y):
+                self.theta_initial[i, j] = ( np.arctan2(self.center[1]-j, self.center[0]-i)+np.pi/2+self.perturbation_angle )% (2 * np.pi)
+
+        elif self.perturbation_type == 'minus_vortex':
             for i in range(self.X):
               for j in range(self.Y):
                 self.theta_initial[i, j] = (np.arctan2(i - self.center[0], j - self.center[1])+np.pi/2+self.perturbation_angle )% (2 * np.pi)
@@ -826,7 +832,7 @@ class ActiveXY:
         return color, arrow
 
 
-    def poltly_configuration(self, arrow_number=None, configuration=None):
+    def plotly_configuration(self, configuration=None):
         if configuration is None: 
             configuration = self.results[-1,:,:,0]
 
@@ -835,46 +841,29 @@ class ActiveXY:
         fig.add_trace(go.Heatmap(
             z=configuration,
             zmin=0, zmax=np.pi*2, 
-            colorscale='hsv',  
+            colorscale='hsv',
+            showscale=False,  
         ))
-        
-        # ##ARROWS 
-        # x_arrows = np.linspace(0, self.X-1, min(self.X, arrow_number), dtype=int, endpoint=True)
-        # y_arrows = np.linspace(0, self.Y-1, min(self.Y, arrow_number), dtype=int, endpoint=True)
+        if self.arrow_number > 0:
+            X, Y = configuration.shape
+            arrow_length = X/self.arrow_number * 0.5
+            # Arrows
+            x, y = np.meshgrid(np.linspace(0, X-1, self.arrow_number, dtype=int), np.linspace(0, Y-1, self.arrow_number, dtype=int))
+            u = np.cos(configuration)[y, x] 
+            v = np.sin(configuration)[y, x] 
 
-        # arrow_length = 0.4 #*  np.sqrt(self.X*self.Y ) / min(min(self.X, arrow_number), self.Y) 
+            # Create quiver plot
+            quiver_fig = ff.create_quiver(x, y, u, v, scale=arrow_length)
 
-        # x_arrow_base, y_arrow_base   = np.meshgrid(x_arrows, y_arrows)
-        # x_arrow_tip, y_arrow_tip     = np.meshgrid(x_arrows, y_arrows)
-
-        # x_arrow_tip = x_arrow_tip.astype(float)
-        # y_arrow_tip = y_arrow_tip.astype(float)
-
-        # x_arrow_tip += np.cos(configuration[x_arrow_base, y_arrow_base]) * arrow_length
-        # y_arrow_tip += np.sin(configuration[x_arrow_base, y_arrow_base]) * arrow_length
-
-        # # Prepare the coordinates for the arrows
-        # x_coords = np.column_stack((x_arrow_base.flatten(), x_arrow_tip.flatten(), np.full(len(x_arrow_base.flatten()), np.nan))).flatten()
-        # y_coords = np.column_stack((y_arrow_base.flatten(), y_arrow_tip.flatten(), np.full(len(y_arrow_base.flatten()), np.nan))).flatten()
-        # fig.add_trace(go.Scatter(
-        #     x=x_coords, 
-        #     y=y_coords,
-        #     mode='lines',
-        #     line=dict(width=2, color='black')
-        # ))
-
-        # # Add circular tips as markers at the tip of each arrow
-        # fig.add_trace(go.Scatter(
-        #     x=x_arrow_tip.flatten(), 
-        #     y=y_arrow_tip.flatten(),
-        #     mode='markers',
-        #     marker=dict(size=8, color='black', symbol='circle'),
-        #     showlegend=False
-        # ))
-
-        # Update layout
-        fig.update_layout( xaxis=dict(showgrid=False), yaxis=dict(showgrid=False))
-
+            arrow_color = 'black'  # Define your desired color here
+            for trace in quiver_fig.data:
+                trace['line']['color'] = arrow_color
+                if 'marker' in trace:
+                    trace['marker']['color'] = arrow_color
+            # Merge quiver plot with heatmap
+            for trace in quiver_fig.data:
+                fig.add_trace(trace)
+     
         # Show the figure
         return fig
 
